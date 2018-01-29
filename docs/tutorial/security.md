@@ -44,7 +44,7 @@ effort are always very welcome.
 
 A security issue exists whenever you receive code from a remote destination and
 execute it locally. As an example, consider a remote website being displayed
-inside a browser window. If an attacker somehow manages to change said content
+inside a `BrowserWindow`. If an attacker somehow manages to change said content
 (either by attacking the source directly, or by sitting between your app and
 the actual destination), they will be able to execute native code on the user's
 machine.
@@ -60,32 +60,28 @@ This is not bulletproof, but at the least, you should attempt the following:
 
 * [Only display secure (https) content](#only-display-secure-content)
 * [Disable the Node integration in all renderers that display remote content](#disable-node-integration-for-remote-content)
-  (setting `nodeIntegration` to `false` in `webPreferences`)
-* Enable context isolation in all renderers that display remote content
-  (setting `contextIsolation` to `true` in `webPreferences`)
-* Use `ses.setPermissionRequestHandler()` in all sessions that load remote content
-* Do not disable `webSecurity`. Disabling it will disable the same-origin policy.
-* Define a [`Content-Security-Policy`](http://www.html5rocks.com/en/tutorials/security/content-security-policy/)
+* [Enable context isolation in all renderers that display remote content](#enable-context-isolation-for-remote-content)
+* [Use `ses.setPermissionRequestHandler()` in all sessions that load remote content](#handle-session-permission-requests-from-remote-content)
+* [Do not disable `webSecurity`](#do-not-disable-websecurity)
+* [Define a `Content-Security-Policy`](#define-a-content-security-policy)
 , and use restrictive rules (i.e. `script-src 'self'`)
-* [Override and disable `eval`](https://github.com/nylas/N1/blob/0abc5d5defcdb057120d726b271933425b75b415/static/index.js#L6-L8)
+* [Override and disable `eval`](#override-and-disable)
 , which allows strings to be executed as code.
-* Do not set `allowRunningInsecureContent` to true.
-* Do not enable `experimentalFeatures` or `experimentalCanvasFeatures` unless
-  you know what you're doing.
-* Do not use `blinkFeatures` unless you know what you're doing.
+* [Do not set `allowRunningInsecureContent` to `true`](#do-not-set-allowRunningInsecureContent-to-true)
+* [Do not enable experimental features](#do-not-enable-enable-experimental-features)
+* [Do not use `blinkFeatures`](#do-not-use-blinkfeatures)
 * WebViews: Do not add the `nodeintegration` attribute.
-* WebViews: Do not use `disablewebsecurity`
 * WebViews: Do not use `allowpopups`
 * WebViews: Do not use `insertCSS` or `executeJavaScript` with remote CSS/JS.
 * [WebViews: Verify the options and params of all `<webview>` tags](#verify-webview-options-before-creation)
 
 ## Only Display Secure Content
+
 Any resources not included with your application should be loaded using a secure
-protocol like `HTTPS`. Furthermore, avoid "mixed content", which occurs when the
-initial HTML is loaded over an `HTTPS` connection, but additional resources
-(scripts, stylesheets, etc) are loaded over an insecure connection.
+protocol like `HTTPS`.
 
 ### Why?
+
 `HTTPS` has three main benefits:
 
 1) It authenticates the remote server, ensuring that the host is actually who it
@@ -100,6 +96,7 @@ initial HTML is loaded over an `HTTPS` connection, but additional resources
    the host.
 
 ### How?
+
 ```js
 // Bad
 browserWindow.loadURL('http://my-website.com')
@@ -119,6 +116,7 @@ browserWindow.loadURL('https://my-website.com')
 ```
 
 ## Disable Node Integration for Remote Content
+
 It is paramount that you disable Node integration in any renderer (`BrowserWindow`,
 `BrowserView`, or `WebView`) that loads remote content. The goal of disabling Node
 integration is to limit the powers you grant to remote content, thus making it
@@ -131,6 +129,7 @@ to the website you are loading. If you are opening a `BrowserWindow` pointed at
 it needs, but no more.
 
 ### Why?
+
 A cross-site-scripting (XSS) attack becomes dramatically more dangerous if an
 attacker can jump out of the renderer process and execute code on the user's
 computer. Cross-site-scripting attacks are fairly common - and while an issue,
@@ -141,6 +140,7 @@ becomes a whole different class of attack: A so-called "Remote Code Execution"
 attacks.
 
 ### How?
+
 ```js
 // Bad
 const mainWindow = new BrowserWindow()
@@ -174,7 +174,164 @@ window.readConfig = function () {
 }
 ```
 
+## Enable Context Isolation for Remote Content
+
+## Handle Session Permission Requests From Remote Content
+
+You may have seen permission requests while using Chrome: They pop up whenever
+the website attempts to use a feature that the user has to manually approve (
+like notifications).
+
+// Todo: What are the events?
+
+### Why?
+
+By default, Electron will automatically approve all permission requests unless
+the developer has manually configured a custom handler. While a solid default,
+security-concious developers might want to assume the very opposite.
+
+### How?
+
+```js
+const { session } = require('electron')
+
+session
+  .fromPartition('some-partition')
+  .setPermissionRequestHandler((webContents, permission, callback) => {
+    const url = webContents.getURL()
+
+    if (permission === 'notifications') {
+      // Approves the permissions request
+      callback(true)
+    }
+
+    if (!url.startsWith('https://my-website.com')) {
+      // Denies the permissions request
+      return callback(false)
+    }
+  })
+```
+
+## Define a Content Security Policy
+
+## Override and Disable `eval`
+
+## Do Not Set `allowRunningInsecureContent` to `true`
+
+By default, Electron will now allow websites loaded over `HTTPS` to load and
+execute scripts, CSS, or plugins from insecure sources (`HTTP`). Setting the
+property `allowRunningInsecureContent` to `true` disables that protection.
+
+Loading the initial HTML of a website over `HTTPS` and attempting to load
+subsequent resources via `HTTP` is also known as "mixed content".
+
+### Why?
+
+See the section on [only displaying secure content](#only-display-secure-content)
+for more details, but simply put, loading content over `HTTPS` assures the
+authenticity and integrity of the loaded resources while encrypting the traffic
+itself.
+
+### How?
+
+```js
+// Bad
+const mainWindow = new BrowserWindow({
+  webPreferences: {
+    allowRunningInsecureContent: true
+  }
+})
+
+// Good
+const mainWindow = new BrowserWindow({})
+```
+
+## Do Not Enable Experimental Features
+
+Advanced users of Electron can enable experimental Chromium features using the
+`experimentalFeatures` and `experimentalCanvasFeatures` properties.
+
+### Why?
+
+Experimental features are, as the name suggests, experimental and have not been
+enabled for all Chromium users. Futhermore, their impact on Electron as a whole
+has likely not been tested.
+
+Legitimate use cases exist, but unless you know what you are doing, you should
+not enable this property.
+
+### How?
+
+```js
+// Bad
+const mainWindow = new BrowserWindow({
+  webPreferences: {
+    experimentalFeatures: true
+  }
+})
+
+// Good
+const mainWindow = new BrowserWindow({})
+```
+
+## Do Not Disable WebSecurity
+
+You may have already guessed that disabling the `webSecurity` property on a
+renderer process (`BrowserView`, `BrowserWindow`, `WebView`) disables crucial
+security features.
+
+Legitimate use cases for this property exist in testing cases, but generally
+speaking, `webSecurity` should never be disabled in any production application.
+
+### Why?
+
+Disbling `webSecurity` will disable the same-origin policy as well as implicitly
+setting the `allowRunningInsecureContent` property to `true`. In other words,
+it allows the execution of insecure code from different domains.
+
+// Todo: Explain same-origin policy
+
+### How?
+```js
+// Bad
+const mainWindow = new BrowserWindow({
+  webPreferences: {
+    webSecurity: false
+  }
+})
+
+// Good
+const mainWindow = new BrowserWindow()
+```
+
+```html
+<!-- Bad -->
+<webview disablewebsecurity src="page.html"></webview>
+
+<!-- Good -->
+<webview src="page.html"></webview>
+```
+
+## Do Not Use `blinkFeatures`
+Blink is the name of the rendering engine behind Chromium.
+
+// Todo: Way more!
+
+### How?
+```js
+// Bad
+const mainWindow = new BrowserWindow({
+  webPreferences: {
+    blinkFeatures: []
+  }
+})
+
+// Good
+const mainWindow = new BrowserWindow()
+```
+
 ## Verify WebView Options Before Creation
+
 A WebView created in a renderer process that does not have Node.js integration
 enabled will not be able to enable integration itself. However, a WebView will
 always create an independent renderer process with its own `webPreferences`.
@@ -183,6 +340,7 @@ It is a good idea to control the creation of new `WebViews` from the main proces
 and to verify that their webPreferences do not disable security features.
 
 ### Why?
+
 Since WebViews live in the DOM, they can be created by a script running on your
 website even if Node integration is otherwise disabled.
 
@@ -192,6 +350,7 @@ features - and you should therefore not allow different configurations for newly
 created `<WebView>` tags.
 
 ### How?
+
 Before a `<WebView>` tag is attached, Electron will fire the
 `will-attach-webview` event on the hosting `webContents`. Use the event to
 prevent the creation of WebViews with possibly insecure options.
